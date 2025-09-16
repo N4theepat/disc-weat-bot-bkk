@@ -1,5 +1,6 @@
 import asyncio
 import time
+import json  # Import the json library
 from radar_downloader import get_clouds_percentage
 from credentials import *
 import requests
@@ -20,20 +21,24 @@ def send_discord_message(message):
     except requests.exceptions.RequestException as e:
         print(f"Failed to send Discord message: {e}")
 
-# Renamed and modified function to send the full report
-def send_full_radar_report(cloud_percentage):
-    # 1. Prepare the text content
+# This function will only send the text part of the report
+def send_text_radar_report(cloud_percentage):
     if cloud_percentage < 10:
-        status_text = f"**There is some chance of rain: {cloud_percentage:.1f}%**"
+        status_text = f"## 🌧 There is some chance of rain: **__{cloud_percentage:.1f}%__**"
     elif 10 <= cloud_percentage < 20:
-        status_text = f"**High chance of rain: {cloud_percentage:.1f}%**"
+        status_text = f"## 🌦 High chance of rain: **__{cloud_percentage:.1f}%__**"
     else:
-        status_text = f"**It is probably raining now: {cloud_percentage:.1f}%**"
+        status_text = f"## ⛈ It is probably raining now: **__{cloud_percentage:.1f}%__**"
 
-    # 2. Prepare the payload for the request
+    # Send the combined text as a single message
+    send_discord_message(f"{status_text}\n> Current Radar Image")
+
+# This new function will handle sending the image and buttons
+def send_radar_image_and_buttons():
+    # 1. Prepare the payload for the request
+    # The 'content' is an empty string because this message is just the image and buttons
     payload = {
-        # This is the main text content, which now includes the bold status
-        'content': f"{status_text}\nCurrent Radar Image",
+        'content': '',
         'components': [
             {
                 'type': 1,
@@ -54,41 +59,45 @@ def send_full_radar_report(cloud_percentage):
             }
         ]
     }
-    
-    # 3. Open the image file and prepare the files payload
+
+    # 2. Open the image file and prepare the files payload
     try:
         with open("radar_tmp.jpg", 'rb') as f:
             files = {
                 'file': ('radar_tmp.jpg', f, 'image/jpeg')
             }
-            # 4. Send the combined request
-            response = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
+            # 3. Send the combined request with the payload converted to a JSON string
+            response = requests.post(
+                DISCORD_WEBHOOK_URL, 
+                data={'payload_json': json.dumps(payload)}, 
+                files=files
+            )
             response.raise_for_status()
-            print("Discord radar report sent successfully.")
+            print("Discord radar image and buttons sent successfully.")
     except requests.exceptions.RequestException as e:
-        print(f"Failed to send Discord radar report: {e}")
+        print(f"Failed to send Discord message: {e}")
     except FileNotFoundError:
         print("Error: radar_tmp.jpg not found. Cannot send report.")
 
-
+# The check_radar_task now calls two separate functions
 async def check_radar_task():
     while(1):
         try:
-            # The get_clouds_percentage function should handle downloading the image and saving it
             cloud_percentage = get_clouds_percentage(False) 
             print(f"Percent = {cloud_percentage}")
 
             if cloud_percentage >= 5:
-                # Call the new combined function
-                send_full_radar_report(cloud_percentage)
+                # 1. Send the text message first
+                send_text_radar_report(cloud_percentage)
+                # 2. Then, send the image and buttons in a separate message
+                send_radar_image_and_buttons()
                 
-                # Determine the delay
                 if cloud_percentage < 10:
                     delay_min = 15
                 elif 10 <= cloud_percentage < 20:
                     delay_min = 30
                 else:
-                    delay_min = 90
+                    delay_min = 45
                 
                 time.sleep(delay_min * 60)
             else:
